@@ -98,20 +98,20 @@ void TimerInit() {
     capconfig_r.captureInputSelect = TIMER_A_CAPTURE_INPUTSELECT_CCIxA;
     capconfig_r.synchronizeCaptureSource = TIMER_A_CAPTURE_SYNCHRONOUS;
     capconfig_r.captureInterruptEnable = TIMER_A_CAPTURECOMPARE_INTERRUPT_ENABLE;
-    Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR1_INTERRUPT ,Encoder_ISR);
+    Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR0_INTERRUPT ,Encoder_ISR);
     Timer_A_initCapture(TIMER_A3_BASE, &capconfig_r);
 
     //compare mode left
-    comconfig1.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
-    comconfig1.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_3;
-    comconfig1.compareValue = 800;
-    Timer_A_initCompare(TIMER_A0_BASE, &comconfig1);
+    comconfig_l.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
+    comconfig_l.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_3;
+    comconfig_l.compareValue = 800;
+    Timer_A_initCompare(TIMER_A0_BASE, &comconfig_l);
 
     //compare mode right
-    comconfig2.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
-    comconfig2.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_4;
-    comconfig2.compareValue = 800;
-    Timer_A_initCompare(TIMER_A0_BASE, &comconfig2);
+    comconfig_r.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
+    comconfig_r.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_4;
+    comconfig_r.compareValue = 800;
+    Timer_A_initCompare(TIMER_A0_BASE, &comconfig_r);
 
     Timer_A_startCounter(TIMER_A3_BASE, TIMER_A_CONTINUOUS_MODE);
     Timer_A_startCounter(TIMER_A0_BASE, TIMER_A_UP_MODE);
