@@ -28,13 +28,13 @@ Timer_A_UpModeConfig config_up;
 int32_t enc_countsL = 0; //Keep track the timer counts since the capture event, track timer counts between encoder edges
 int32_t enc_countsR = 0;
 int32_t enc_trackL = 0;//keep track of timer since capture
-int32_t enc_trackR = 0;
+int32_t enc_track = 0;
 int32_t timer_sumL = 0; //store summation of wheel speed
 int32_t timer_sumR = 0;
 uint8_t timer_countL = 0; //track number of measurements in the summation variable
 uint8_t timer_countR = 0;
-//uint8_t cur_pwmL; //store the current PWM
-//uint8_t cur_pwmR;
+uint16_t cur_pwmL; //store the current PWM
+uint16_t cur_pwmR;
 
 
 
@@ -70,6 +70,9 @@ void GPIOInit() {
     GPIO_setAsPeripheralModuleFunctionOutputPin( 2 , GPIO_PIN7 , GPIO_PRIMARY_MODULE_FUNCTION ); //pwm speed left, timer 0 register 4
     GPIO_setAsPeripheralModuleFunctionInputPin(10 , GPIO_PIN4 , GPIO_PRIMARY_MODULE_FUNCTION ); //timer 3 register 0
     GPIO_setAsPeripheralModuleFunctionInputPin(10 , GPIO_PIN5 , GPIO_PRIMARY_MODULE_FUNCTION ); //timer 3 register 1
+
+    GPIO_setOutputHighOnPin(3, GPIO_PIN6 | GPIO_PIN7);
+    GPIO_setOutputLowOnPin(5, GPIO_PIN4 | GPIO_PIN5);
 }
 
 void TimerInit() {
@@ -92,7 +95,7 @@ void TimerInit() {
     capconfig_l.captureInputSelect = TIMER_A_CAPTURE_INPUTSELECT_CCIxA;
     capconfig_l.synchronizeCaptureSource = TIMER_A_CAPTURE_SYNCHRONOUS;
     capconfig_l.captureInterruptEnable = TIMER_A_CAPTURECOMPARE_INTERRUPT_ENABLE;
-    Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR0_INTERRUPT ,Encoder_ISR);
+    //Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR0_INTERRUPT ,Encoder_ISR);
     Timer_A_initCapture(TIMER_A3_BASE, &capconfig_l);
 
     //capture mode right
@@ -101,19 +104,19 @@ void TimerInit() {
     capconfig_r.captureInputSelect = TIMER_A_CAPTURE_INPUTSELECT_CCIxA;
     capconfig_r.synchronizeCaptureSource = TIMER_A_CAPTURE_SYNCHRONOUS;
     capconfig_r.captureInterruptEnable = TIMER_A_CAPTURECOMPARE_INTERRUPT_ENABLE;
-    Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR0_INTERRUPT ,Encoder_ISR);
+    //Timer_A_registerInterrupt(TIMER_A3_BASE ,TIMER_A_CCR0_INTERRUPT ,Encoder_ISR);
     Timer_A_initCapture(TIMER_A3_BASE, &capconfig_r);
 
     //compare mode left
     comconfig_l.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
-    comconfig_l.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_3;
-    comconfig_l.compareValue = 800;
+    comconfig_l.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_4;
+    comconfig_l.compareValue = 400;
     Timer_A_initCompare(TIMER_A0_BASE, &comconfig_l);
 
     //compare mode right
     comconfig_r.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
-    comconfig_r.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_4;
-    comconfig_r.compareValue = 800;
+    comconfig_r.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_3;
+    comconfig_r.compareValue = 400;
     Timer_A_initCompare(TIMER_A0_BASE, &comconfig_r);
 
     Timer_A_startCounter(TIMER_A3_BASE, TIMER_A_CONTINUOUS_MODE);
@@ -121,44 +124,57 @@ void TimerInit() {
 }
 
 void Encoder_ISR() {
+    if(Timer_A_getEnabledInterruptStatus(TIMER_A3_BASE)){
+        Timer_A_clearInterruptFlag(TIMER_A3_BASE);
+        enc_track+=65536;
+    }
     //left capture
-    if (Timer_A_getCaptureCompareEnabledInterruptStatus(
+    else if (Timer_A_getCaptureCompareEnabledInterruptStatus(
             TIMER_A3_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_0)
                     & TIMER_A_CAPTURECOMPARE_INTERRUPT_FLAG) {
+        Timer_A_clearCaptureCompareInterrupt(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
         //calculate timer between edges
-        enc_countsL = enc_trackL + Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
-        enc_trackL = -1*Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
+        enc_countsL = enc_track + Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
+        enc_track = -1*Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
         timer_sumL+= enc_countsL;
         timer_countL ++;
         if(timer_countL==6){
             // 37.5% duty cycle
-            if(timer_sumL/6> 48750){
-                Timer_A_setCompareValue(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0, comconfig_l.compareValue--);
+            cur_pwmL = comconfig_l.compareValue;
+            //printf("%d %d    ",comconfig_l.compareValue, timer_sumL/6);
+            if((timer_sumL/6)>48750){
+                cur_pwmL--;
+
             }
-            else if(timer_sumL/6<48750){
-                Timer_A_setCompareValue(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0, comconfig_l.compareValue++);
+            else if((timer_sumL)/6<48750){
+                cur_pwmL++;
             }
+            Timer_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_3, comconfig_l.compareValue=cur_pwmL);
             timer_sumL=0;
             timer_countL=0;
         }
-
     }
     else if (Timer_A_getCaptureCompareEnabledInterruptStatus(
             TIMER_A3_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_1)
                     & TIMER_A_CAPTURECOMPARE_INTERRUPT_FLAG) {
+        Timer_A_clearCaptureCompareInterrupt(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
         //calculate timer between edges
-        enc_countsR = enc_trackR + Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
-        enc_trackR = -1*Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
+        enc_countsR = enc_track + Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
+        enc_track = -1*Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
         timer_sumR+= enc_countsR;
         timer_countR ++;
         if(timer_countR==6){
             // 37.5% duty cycle
-            if(timer_sumR/6> 48750){
-                Timer_A_setCompareValue(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1, comconfig_r.compareValue--);
+            cur_pwmR = comconfig_r.compareValue;
+            printf("%d %d\r\n", cur_pwmL, cur_pwmR);//comconfig_r.compareValue,comconfig_l.compareValue );
+            if((timer_sumR/6)>48750){
+                cur_pwmR--;
+
             }
-            else if(timer_sumR/6<48750){
-                Timer_A_setCompareValue(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1, comconfig_r.compareValue++);
+            else if((timer_sumR)/6<48750){
+                cur_pwmR++;
             }
+            Timer_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_4, comconfig_r.compareValue=cur_pwmR);
             timer_sumR=0;
             timer_countR=0;
         }
