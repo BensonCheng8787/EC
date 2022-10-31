@@ -16,6 +16,7 @@
 void GPIOInit();
 void TimerInit();
 void Encoder_ISR();
+void straight(uint16_t target);
 
 // Add global variables here, as needed.
 Timer_A_CaptureModeConfig capconfig_l;
@@ -38,6 +39,13 @@ uint16_t cur_pwmR = 300;
 uint32_t avgL;
 uint32_t avgR;
 
+uint8_t stop = 1;//stop car
+uint32_t distL;
+uint32_t distR;
+uint32_t enc_totalL;
+uint32_t enc_totalR;
+float circ = 0.60956;//circumfrence of wheel for one enc
+
 
 
 
@@ -53,9 +61,9 @@ int main(void) /* Main Function */
     TimerInit();
 
     // Place initialization code (or run-once) code here
-
+    straight(1830);
     while(1){
-        printf("%d %d\r\n", avgL,avgR);
+        printf("%d %d %d\r\n", avgL,avgR, stop);
 
 
     }
@@ -143,14 +151,14 @@ void Encoder_ISR() {
         enc_trackL = -Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_0);
         timer_sumL+= enc_countsL;
         timer_countL++;
+        enc_totalL++;
         if(timer_countL==6){
-
             avgL = timer_sumL/6;
             // 37.5% duty cycle
-            if((timer_sumL/6)>48750){
+            if(!stop&&(timer_sumL/6)>48750){
                 cur_pwmL++;
             }
-            else if((timer_sumL)/6<48750){
+            else if(!stop&&(timer_sumL)/6<48750){
                 cur_pwmL--;
             }
             Timer_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_3,cur_pwmL);
@@ -158,6 +166,7 @@ void Encoder_ISR() {
             timer_countL=0;
         }
     }
+    //right capture
     else if (Timer_A_getCaptureCompareEnabledInterruptStatus(
             TIMER_A3_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_1)
                     & TIMER_A_CAPTURECOMPARE_INTERRUPT_FLAG) {
@@ -166,14 +175,15 @@ void Encoder_ISR() {
         enc_countsR = enc_trackR + Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
         enc_trackR = -Timer_A_getCaptureCompareCount(TIMER_A3_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_1);
         timer_sumR+= enc_countsR;
-        timer_countR ++;
+        timer_countR++;
+        enc_totalR++;
         if(timer_countR==6){
             // 37.5% duty cycle
             avgR = timer_sumR/6;
-            if((timer_sumR/6)>48750){
+            if(!stop&&(timer_sumR/6)>48750){
                 cur_pwmR++;
             }
-            else if((timer_sumR)/6<48750){
+            else if(!stop&&(timer_sumR)/6<48750){
                 cur_pwmR--;
             }
             Timer_A_setCompareValue(TIMER_A0_BASE, TIMER_A_CAPTURECOMPARE_REGISTER_4, cur_pwmR);
@@ -183,5 +193,18 @@ void Encoder_ISR() {
     }
 }
 
+void straight(uint16_t target){
+    enc_totalR =0;
+    //enc_totalL = 0;
+    uint16_t distance =0;
+    while(distance< target){
+        distance = circ*enc_totalR;
+        stop = 0;
+        printf("%d\r\n",distance);
+    }
+    stop = 1;
+    cur_pwmL = 0;
+    cur_pwmR = 0;
+}
 
 // Add interrupt functions last so they are easy to find
