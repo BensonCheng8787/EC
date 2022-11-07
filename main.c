@@ -138,6 +138,13 @@ void ADCInit(){
 
 //set up timer, pwm, and encoder
 void PWMInit(){
+    //set up Timer_A2 to run at 30kHz (0.03ms)
+    TA2cfg.clockSource = TIMER_A_CLOCKSOURCE_SMCLK;
+    TA2cfg.closkSourceDivider = Timer_A_CLOCKSOURCE_DIVIDER_8;
+    TA2cfg.timerPeriod = 100;
+    TA2cfg.timerInterruptEnable_TAIE = TIMER_A_TAIE_INTERRUPT_ENABLE;
+    Timer_A_configureUpMode(TIMER_A2_BASE,&TA2cfg);
+
     // Set up Timer_A0 to run at 100ms
     TA0cfg.clockSource = TIMER_A_CLOCKSOURCE_SMCLK;
     TA0cfg.clockSourceDivider = TIMER_A_CLOCKSOURCE_DIVIDER_64;
@@ -145,7 +152,7 @@ void PWMInit(){
     TA0cfg.timerInterruptEnable_TAIE = TIMER_A_TAIE_INTERRUPT_ENABLE;
     Timer_A_configureUpMode(TIMER_A0_BASE,&TA2cfg);
 
-    // Set up Timer_A3 to run contonious
+    // Set up Timer_A3 to run continuous
     TA3cfg.clockSource = TIMER_A_CLOCKSOURCE_SMCLK;
     TA3cfg.clockSourceDivider = TIMER_A_CLOCKSOURCE_DIVIDER_1;
     TA3cfg.timerInterruptEnable_TAIE = TIMER_A_TAIE_INTERRUPT_ENABLE;
