@@ -10,6 +10,7 @@ void setSpeed();
 
 //timer configs
 Timer_A_UpModeConfig TA2cfg; // Using P5.7, TA2.2
+Timer_A_UpModeConfig TA0cfg;
 Timer_A_ContinuousModeConfig TA3cfg; //capture speed
 Timer_A_CompareModeConfig TA0_ccrL; //speed left  (set)
 Timer_A_CompareModeConfig TA0_ccrR; //speed right (set)
