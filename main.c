@@ -20,6 +20,8 @@ Timer_A_CaptureModeConfig capconfig_r;
 //encoder isr
 int32_t enc_countsL = 0; //Keep track the timer counts since the capture event, track timer counts between encoder edges
 int32_t enc_countsR = 0;
+int32_t enc_totalL = 0;
+int32_t enc_totalR = 0;
 int32_t enc_trackL = 0;//keep track of timer since capture
 int32_t enc_trackR = 0;
 int32_t timer_sumL = 0; //store summation of wheel speed
@@ -85,9 +87,9 @@ int main(void)
 
 
 
-            printf("\r%5u\t   %1.3f\t  %5u\t   %1.3f\t%5u",pot_val,desired,rc_val,actual,pwm_set); // report
+            //printf("\r%5u\t   %1.3f\t  %5u\t   %1.3f\t%5u",pot_val,desired,rc_val,actual,pwm_set); // report
             __delay_cycles(240e3); // crude delay to prevent this from running too quickly
-            timer_flag = 0; // Mark that we've performed the control loop
+            //timer_flag = 0; // Mark that we've performed the control loop
 
         }
     }
@@ -141,7 +143,7 @@ void ADCInit(){
 void PWMInit(){
     //set up Timer_A2 to run at 30kHz (0.03ms)
     TA2cfg.clockSource = TIMER_A_CLOCKSOURCE_SMCLK;
-    TA2cfg.closkSourceDivider = Timer_A_CLOCKSOURCE_DIVIDER_8;
+    TA2cfg.clockSourceDivider = TIMER_A_CLOCKSOURCE_DIVIDER_8;
     TA2cfg.timerPeriod = 100;
     TA2cfg.timerInterruptEnable_TAIE = TIMER_A_TAIE_INTERRUPT_ENABLE;
     Timer_A_configureUpMode(TIMER_A2_BASE,&TA2cfg);
@@ -182,12 +184,12 @@ void PWMInit(){
     TA0_ccrL.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
     TA0_ccrL.compareValue = pwm_setL;
     TA0_ccrL.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_4;
-    Timer_A_initCompare(TIMER_A0_BASE,&TA2_ccr);
+    Timer_A_initCompare(TIMER_A0_BASE,&TA0_ccrL);
     // Configure TA2.CCR3 for PWM generation (right)
     TA0_ccrR.compareOutputMode = TIMER_A_OUTPUTMODE_RESET_SET;
     TA0_ccrR.compareValue = pwm_setL;
     TA0_ccrR.compareRegister = TIMER_A_CAPTURECOMPARE_REGISTER_3;
-    Timer_A_initCompare(TIMER_A0_BASE,&TA3_ccr);
+    Timer_A_initCompare(TIMER_A0_BASE,&TA0_ccrR);
 
     Timer_A_registerInterrupt(TIMER_A0_BASE,TIMER_A_CCRX_AND_OVERFLOW_INTERRUPT,PWM_ISR);
     Timer_A_startCounter(TIMER_A2_BASE,TIMER_A_UP_MODE);
