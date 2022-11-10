@@ -23,6 +23,15 @@ uint32_t enc_total_L,enc_total_R;
 float potSpeed,desiredSpeed,actualSpeed;
 int32_t Tach_L_count,Tach_L,Tach_L_sum,Tach_L_sum_count,Tach_L_avg; // Left wheel
 int32_t Tach_R_count,Tach_R,Tach_R_sum,Tach_R_sum_count,Tach_R_avg; // Right wheel
+//speed control
+float ki,kp,pwm_setL,pwm_setR,pwm_max,pwm_min;
+//turn control
+float pwm_set,dt,rl,rr,vl,vr,r;
+r = 74.5;
+pwm_max = 720;
+pwm_min = 0;
+kp = 0.05;
+ki = 256;
 
 uint8_t run_control = 0; // Flag to denote that 100ms has passed and control should be run.
 
@@ -42,17 +51,37 @@ int main(void)
             ADC14_toggleConversionTrigger();
             while(ADC14_isBusy()){}
             potSpeed = 1.0*3.3*ADC14_getResult(ADC_MEM12)/16384;
+            potTurn = 1.0*3.3*ADC14_getResult(ADC_MEM13)/16384;
             potSpeed /=20.48;
+            actualSpeed = 1500000/Tach_L_counts*8;
             //%50 = 100, %10 = 0, else d = p
             if(potSpeed>400){
-                desiredSpeed = 800;
+                desiredSpeed = pwm_max;//(720)
             }
             else if(potSpeed < 80){
-                desiredSpeed = 0;
+                desiredSpeed = pwm_min;//(0)
             }
             else{
                 desiredSpeed = potSpeed;
             }
+            //turn control//
+            dv = (pwm_set*0.5*74.5)/500000;
+
+
+            //speed control//
+            //left inetgration
+            Tach_L_sum += desiredSpeed - actualSpeed;//integration
+            pwm_setL = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_L_sum; // PI control equation
+            if(pwm_setL > pwm_max) pwm_setL = pwm_max;  // Set limits on the pwm control output
+            if(pwm_setL < pwm_min) pwm_setL = pwm_min;
+            pwm_set = pwm_setL;
+            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setL); // enforce pwm control output
+            //right integration
+            Tach_R_sum += desiredSpeed - actualSpeed;//integration
+            pwm_setR = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_R_sum; // PI control equation
+            if(pwm_setR > pwm_max) pwm_setR = pwm_max;  // Set limits on the pwm control output
+            if(pwm_setR < pwm_min) pwm_setR = pwm_min;
+            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setR); // enforce pwm control output
 
         }
     }
@@ -63,14 +92,14 @@ void ADCInit(){
     ADC14_enableModule();
     ADC14_initModule(ADC_CLOCKSOURCE_SMCLK, ADC_PREDIVIDER_4, ADC_DIVIDER_1, 0);
     ADC14_configureConversionMemory(ADC_MEM12, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A12, 0);//p6 pin1(speed)
-    ADC14_configureConversionMemory(ADC_MEM13, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A13, 0);//p6 pin0(turn)
+    ADC14_configureConversionMemory(ADC_MEM9, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A9, 0);//p6 pin0(turn)
     //ADC14_configureSingleSampleMode(ADC_MEM14, true); // part 1
-    ADC14_configureMultiSequenceMode(ADC_MEM12, ADC_MEM13, true);//part2
+    ADC14_configureMultiSequenceMode(ADC_MEM12, ADC_MEM9, true);//part2
     //ADC14_setSampleHoldTrigger(ADC_TRIGGER_SOURCE6, false);
     ADC14_enableSampleTimer(ADC_MANUAL_ITERATION);
     ADC14_enableConversion();
     //  Don't forget the GPIO, either here or in GPIOInit()!!
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN0|GPIO_PIN1,GPIO_PRIMARY_MODULE_FUNCTION);
+    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN4|GPIO_PIN1,GPIO_PRIMARY_MODULE_FUNCTION);
 
 }
 
