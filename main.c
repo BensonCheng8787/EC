@@ -8,6 +8,8 @@ void ADCInit();
 void Encoder_ISR();
 void T1_100ms_ISR();
 
+void checkState();//checks the current state of the car(straight or turning) updates var state if done
+
 Timer_A_UpModeConfig TA0cfg;
 Timer_A_UpModeConfig TA1cfg;
 Timer_A_ContinuousModeConfig TA3cfg;
@@ -20,18 +22,20 @@ Timer_A_CaptureModeConfig TA3_ccr1;
 // Encoder total events
 uint32_t enc_total_L,enc_total_R;
 // Speed measurement variables
-float potSpeed,desiredSpeed,actualSpeed;
+float potSpeed,desiredSpeed,actualSpeedL,actualSpeedR;
+float potDist,desiredDist,actualDist;
 int32_t Tach_L_count,Tach_L,Tach_L_sum,Tach_L_sum_count,Tach_L_avg; // Left wheel
 int32_t Tach_R_count,Tach_R,Tach_R_sum,Tach_R_sum_count,Tach_R_avg; // Right wheel
 //speed control
-float ki,kp,pwm_setL,pwm_setR,pwm_max,pwm_min;
+float ki = 0.1;
+float pwm_setL,pwm_setR,pwm_max,pwm_min;
 //turn control
-float pwm_set,dt,rl,rr,vl,vr,r;
-r = 74.5;
-pwm_max = 720;
-pwm_min = 0;
-kp = 0.05;
-ki = 256;
+float pwm_set,dt,rl,rr,vl,vr,r,dv;
+
+uint16_t curDistance; //current distance
+uint8_t state; //1 means straight and 0 means turning
+uint32_t errorSum;
+
 
 uint8_t run_control = 0; // Flag to denote that 100ms has passed and control should be run.
 
@@ -44,45 +48,71 @@ int main(void)
 
     __delay_cycles(24e6);
 
+    r = 74.5;
+    pwm_max = 720;//90%
+    pwm_min = 80;//10%
+
     while(1){
         if(run_control){    // If 100 ms has passed
             run_control = 0;    // Reset the 100 ms flag
             //get speed
             ADC14_toggleConversionTrigger();
             while(ADC14_isBusy()){}
-            potSpeed = 1.0*3.3*ADC14_getResult(ADC_MEM12)/16384;
-            potTurn = 1.0*3.3*ADC14_getResult(ADC_MEM13)/16384;
-            potSpeed /=20.48;
-            actualSpeed = 1500000/Tach_L_counts*8;
-            //%50 = 100, %10 = 0, else d = p
-            if(potSpeed>400){
-                desiredSpeed = pwm_max;//(720)
-            }
-            else if(potSpeed < 80){
-                desiredSpeed = pwm_min;//(0)
-            }
-            else{
-                desiredSpeed = potSpeed;
-            }
-            //turn control//
-            dv = (pwm_set*0.5*74.5)/500000;
+            potSpeed = ADC14_getResult(ADC_MEM0);
+            desiredSpeed = (800*potSpeed)/16384;
+            actualSpeedL = (8*1500000)/Tach_L_sum;//actual speed for left wheel
+            actualSpeedR = (8*1500000)/Tach_R_sum;//actual speed for right wheel
 
-
-            //speed control//
-            //left inetgration
-            Tach_L_sum += desiredSpeed - actualSpeed;//integration
-            pwm_setL = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_L_sum; // PI control equation
-            if(pwm_setL > pwm_max) pwm_setL = pwm_max;  // Set limits on the pwm control output
-            if(pwm_setL < pwm_min) pwm_setL = pwm_min;
-            pwm_set = pwm_setL;
+            //left wheel
+            errorSum += desiredSpeed - actualSpeedL;//integration for left
+            pwm_setL = desiredSpeed + ki*errorSum;//PI control equation
+            if(pwm_setL > pwm_max) {
+                pwm_setL = pwm_max;
+            }
+            else if (pwm_setL < pwm_min) {
+                pwm_setL = pwm_min;
+            }
             Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setL); // enforce pwm control output
-            //right integration
-            Tach_R_sum += desiredSpeed - actualSpeed;//integration
-            pwm_setR = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_R_sum; // PI control equation
-            if(pwm_setR > pwm_max) pwm_setR = pwm_max;  // Set limits on the pwm control output
-            if(pwm_setR < pwm_min) pwm_setR = pwm_min;
-            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setR); // enforce pwm control output
 
+
+            //right wheel
+            errorSum += desiredSpeed - actualSpeedR;//integration for left
+            pwm_setR = desiredSpeed + ki*errorSum;//PI control equation
+            if(pwm_setR > pwm_max) {
+                pwm_setR = pwm_max;
+            }
+            else if (pwm_setR < pwm_min) {
+                pwm_setR = pwm_min;
+            }
+            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
+
+
+            potDist = ADC14_getResult(ADC_MEM1);
+
+
+            printf("\r\n\npotSpeed: %1.3f  desiredSpeed: %1.3f    \r\nactualR: %1.3f   actualL: %1.3f   \r\npwmR: %1.3f      pwmL: %1.3f  \r\n%d",potSpeed,desiredSpeed,actualSpeedR, actualSpeedL,pwm_setR,pwm_setL,Tach_L_sum);
+
+
+            //turn control//
+//            dv = (pwm_set*0.5*74.5)/500000;
+
+
+//
+//            //speed control//
+//            //left inetgration
+//            Tach_L_sum += desiredSpeed - actualSpeed;//integration
+//            pwm_setL = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_L_sum; // PI control equation
+//            if(pwm_setL > pwm_max) pwm_setL = pwm_max;  // Set limits on the pwm control output
+//            if(pwm_setL < pwm_min) pwm_setL = pwm_min;
+//            pwm_set = pwm_setL;
+//            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setL); // enforce pwm control output
+//            //right integration
+//            Tach_R_sum += desiredSpeed - actualSpeed;//integration
+//            pwm_setR = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_R_sum; // PI control equation
+//            if(pwm_setR > pwm_max) pwm_setR = pwm_max;  // Set limits on the pwm control output
+//            if(pwm_setR < pwm_min) pwm_setR = pwm_min;
+//            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setR); // enforce pwm control output
+//            __delay_cycles(240e3);
         }
     }
 }
@@ -90,16 +120,14 @@ int main(void)
 void ADCInit(){
     // Add your ADC initialization code here.
     ADC14_enableModule();
-    ADC14_initModule(ADC_CLOCKSOURCE_SMCLK, ADC_PREDIVIDER_4, ADC_DIVIDER_1, 0);
-    ADC14_configureConversionMemory(ADC_MEM12, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A12, 0);//p6 pin1(speed)
-    ADC14_configureConversionMemory(ADC_MEM9, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A9, 0);//p6 pin0(turn)
-    //ADC14_configureSingleSampleMode(ADC_MEM14, true); // part 1
-    ADC14_configureMultiSequenceMode(ADC_MEM12, ADC_MEM9, true);//part2
-    //ADC14_setSampleHoldTrigger(ADC_TRIGGER_SOURCE6, false);
+    ADC14_initModule(ADC_CLOCKSOURCE_SMCLK, ADC_PREDIVIDER_1, ADC_DIVIDER_4, 0);
+    ADC14_configureConversionMemory(ADC_MEM0, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A12, false);//p4 pin1(speed)
+    ADC14_configureConversionMemory(ADC_MEM1, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A9, false);//p4 pin4(turn)
     ADC14_enableSampleTimer(ADC_MANUAL_ITERATION);
+    ADC14_configureMultiSequenceMode(ADC_MEM0, ADC_MEM1, false);//part2
     ADC14_enableConversion();
     //  Don't forget the GPIO, either here or in GPIOInit()!!
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN4|GPIO_PIN1,GPIO_PRIMARY_MODULE_FUNCTION);
+
 
 }
 
@@ -110,6 +138,9 @@ void GPIOInit(){
     GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P2,GPIO_PIN6|GPIO_PIN7,GPIO_PRIMARY_MODULE_FUNCTION);
         // Motor Encoder pins
     GPIO_setAsPeripheralModuleFunctionInputPin(GPIO_PORT_P10,GPIO_PIN4|GPIO_PIN5,GPIO_PRIMARY_MODULE_FUNCTION);
+
+    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN1,GPIO_TERTIARY_MODULE_FUNCTION);//desired speed potentiometer
+    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN4,GPIO_TERTIARY_MODULE_FUNCTION);//desired turning radius
 
     GPIO_setOutputLowOnPin(GPIO_PORT_P5,GPIO_PIN4|GPIO_PIN5);   // Motors set to forward
     GPIO_setOutputLowOnPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);   // Motors are OFF
@@ -208,4 +239,19 @@ void Encoder_ISR(){
 void T1_100ms_ISR(){
     Timer_A_clearInterruptFlag(TIMER_A1_BASE);
     run_control = 1;
+}
+
+void checkState(){
+    curDistance = 0;
+
+    curDistance = (enc_total_L * 0.60956)/360;
+
+//    //distance of the straight away
+//    if (curdistance >= actualDist) {
+//        state = 1; //1 means that it switches to turning
+//    }
+//    else if (curdistance >= actualDist) {
+//        state = 0; //0 means it switches turning
+//    }
+
 }
