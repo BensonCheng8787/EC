@@ -22,15 +22,14 @@ Timer_A_CaptureModeConfig TA3_ccr1;
 uint32_t enc_total_L,enc_total_R;
 // Speed measurement variables
 float potSpeed,desiredSpeed,actualSpeedL,actualSpeedR;
-float potDist,desiredDist,actualDist;
+float potDist,desiredDist,desiredDistRadius;
 int32_t Tach_L_count,Tach_L,Tach_L_sum,Tach_L_sum_count,Tach_L_avg; // Left wheel
 int32_t Tach_R_count,Tach_R,Tach_R_sum,Tach_R_sum_count,Tach_R_avg; // Right wheel
 //speed control
 float ki = 0.1;
 float pwm_setL,pwm_setR,pwm_max,pwm_min;
 //turn control
-float pwm_set,dt,rl,rr,vl,vr,radius,dw;
-dw = 149; //in mm
+float pwm_set,dt,rl,rr,vl,vr,radius,dw,dv,speedL,speedR;
 uint16_t curDistance; //current distance
 uint8_t state; //1 means straight and 0 means turning
 uint32_t errorSumL, errorSumR;
@@ -48,9 +47,12 @@ int main(void)
     __delay_cycles(24e6);
     GPIO_setOutputHighOnPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);//motor back on
 
-    r = 74.5;
     pwm_max = 720;//90%
     pwm_min = 80;//10%
+    dw = 149; //in mm
+    pwm_setL = 0;
+    pwm_setR = 0;
+    state = 1;
 
     while(1){
         if(run_control){    // If 100 ms has passed
@@ -59,53 +61,76 @@ int main(void)
             ADC14_toggleConversionTrigger();
             while(ADC14_isBusy()){}
             potSpeed = ADC14_getResult(ADC_MEM0);
+            potDist = ADC14_getResult(ADC_MEM1);
+
             desiredSpeed = (800*potSpeed)/16384;
             actualSpeedL = (8*1500000)/Tach_L_avg;//actual speed for left wheel
             actualSpeedR = (8*1500000)/Tach_R_avg;//actual speed for right wheel
 
-            //left wheel
-            errorSumL += desiredSpeed - actualSpeedL;//integration for left
-            pwm_setL = desiredSpeed + ki*errorSumL;//PI control equation
+            desiredDist = (2413*potDist)/16384;
+            desiredDistRadius = (2972*potDist)/16384;
+
+            //minimum Distance
+            if (desiredDist < 508)
+                desiredDist = 508;
+
+            //minimum Radius
+            if (desiredDist < 381)
+                desiredDist = 381;
+
+            //turning
+            if(!state) {
+                dv = desiredSpeed*(0.5*dw/desiredDistRadius);//differential
+                dv-=0.3;
+                speedL = desiredSpeed - dv;
+                speedR = desiredSpeed + dv;
+                //PI left
+                errorSumL += speedL - actualSpeedL;//integration for left
+                pwm_setL = speedL + ki*errorSumL;//PI control equation
+
+                //PI right
+                errorSumR += speedR - actualSpeedR;//integration for left
+                pwm_setR = speedR + ki*errorSumR;//PI control equation
+            }
+            else if (state){
+                //left wheel
+                errorSumL += desiredSpeed - actualSpeedL;//integration for left
+                pwm_setL = desiredSpeed + ki*errorSumL;//PI control equation
+                pwm_setL -= 3;
+
+                //right wheel
+                errorSumR += desiredSpeed - actualSpeedR;//integration for left
+                pwm_setR = desiredSpeed + ki*errorSumR;//PI control equation
+
+            }
+
+
+
             if(pwm_setL > pwm_max) {
                 pwm_setL = pwm_max;
             }
             else if (pwm_setL <= pwm_min) {
                 pwm_setL = 0;
             }
-            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setL); // enforce pwm control output
 
-            //right wheel
-            errorSumR += desiredSpeed - actualSpeedR;//integration for left
-            pwm_setR = desiredSpeed + ki*errorSumR;//PI control equation
+
+
             if(pwm_setR > pwm_max) {
                 pwm_setR = pwm_max;
             }
             else if (pwm_setR <= pwm_min) {
                 pwm_setR = 0;
             }
+
+            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setL); // enforce pwm control output
             Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
 
-            potDist = ADC14_getResult(ADC_MEM1);
 
-            printf("\r\n\npotSpeed: %1.3f  desiredSpeed: %1.3f    \r\nactualR: %1.3f   actualL: %1.3f   \r\npwmR: %1.3f      pwmL: %1.3f  \r\n%d",potSpeed,desiredSpeed,actualSpeedR, actualSpeedL,pwm_setR,pwm_setL,Tach_L_sum);
+            printf("\r\n\npotSpeed: %1.3f  desiredSpeed: %1.3f    \r\nactualR: %1.3f   actualL: %1.3f   \r\npwmR: %1.3f      pwmL: %1.3f",potSpeed,desiredSpeed,actualSpeedR, actualSpeedL,pwm_setR,pwm_setL);
+            printf("\r\n\npotDist: %1.3f  desiredDist: %1.3f  desiredRadius: %1.3f   desiredDistturning: %1.3f   curDistance: %d   state: %d   dv: %1.3f",potDist,desiredDist,desiredDistRadius,(3.14159)*(desiredDistRadius-74.5),curDistance,state,dv);
 
+            checkState();
 
-            //turn control//
-//            dv = (pwm_set*0.5*74.5)/500000;
-//            //speed control//
-//            //left inetgration
-//            Tach_L_sum += desiredSpeed - actualSpeed;//integration
-//            pwm_setL = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_L_sum; // PI control equation
-//            if(pwm_setL > pwm_max) pwm_setL = pwm_max;  // Set limits on the pwm control output
-//            if(pwm_setL < pwm_min) pwm_setL = pwm_min;
-//            pwm_set = pwm_setL;
-//            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setL); // enforce pwm control output
-//            //right integration
-//            Tach_R_sum += desiredSpeed - actualSpeed;//integration
-//            pwm_setR = kp*(pwm_max-pwm_min)/desiredSpeed-ki*Tach_R_sum; // PI control equation
-//            if(pwm_setR > pwm_max) pwm_setR = pwm_max;  // Set limits on the pwm control output
-//            if(pwm_setR < pwm_min) pwm_setR = pwm_min;
-//            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setR); // enforce pwm control output
             __delay_cycles(240e3);
 
         }
@@ -237,22 +262,23 @@ void T1_100ms_ISR(){
 }
 
 void checkState(){
-    curDistance = 0;
 
-    curDistance = (enc_total_L * 0.60956)/360;
+    curDistance = (enc_total_L * 0.60956);
 
-//    //distance of the straight away
-//    if (curdistance >= actualDist) {
-//        state = 1; //1 means that it switches to turning
-//    }
-//    else if (curdistance >= actualDist) {
-//        state = 0; //0 means it switches turning
-//    }
+    //turning and switches to straight
+    if (state == 0 && (curDistance+15 >= (3.14159)*(desiredDistRadius+70))) {
+        enc_total_L = 0;
+        state = 1; //1 means that it switches to straight
+    }
+    else if (state == 1 && curDistance >= desiredDist) {
+        enc_total_L = 0;
+        state = 0; //0 means it switches turning
+    }
 
 }
 
 void turning(){//turn left
-    dv = desiredSpeed(0.5*dw/potDist);//differential
+    dv = desiredSpeed*(0.5*dw/potDist);//differential
     speedL = pwm_setL - dv;
     speedR = pwm_setR + dv;
     //PI left
