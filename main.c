@@ -1,5 +1,3 @@
-// ENGR-2350 Lab 4 Template S22
-
 #include "engr2350_msp432.h"
 
 void GPIOInit();
@@ -7,6 +5,7 @@ void TimerInit();
 void ADCInit();
 void Encoder_ISR();
 void T1_100ms_ISR();
+void turning();
 
 void checkState();//checks the current state of the car(straight or turning) updates var state if done
 
@@ -30,11 +29,11 @@ int32_t Tach_R_count,Tach_R,Tach_R_sum,Tach_R_sum_count,Tach_R_avg; // Right whe
 float ki = 0.1;
 float pwm_setL,pwm_setR,pwm_max,pwm_min;
 //turn control
-float pwm_set,dt,rl,rr,vl,vr,r,dv;
-
+float pwm_set,dt,rl,rr,vl,vr,radius,dw;
+dw = 149; //in mm
 uint16_t curDistance; //current distance
 uint8_t state; //1 means straight and 0 means turning
-uint32_t errorSum;
+uint32_t errorSumL, errorSumR;
 
 
 uint8_t run_control = 0; // Flag to denote that 100ms has passed and control should be run.
@@ -47,6 +46,7 @@ int main(void)
     TimerInit();
 
     __delay_cycles(24e6);
+    GPIO_setOutputHighOnPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);//motor back on
 
     r = 74.5;
     pwm_max = 720;//90%
@@ -60,44 +60,38 @@ int main(void)
             while(ADC14_isBusy()){}
             potSpeed = ADC14_getResult(ADC_MEM0);
             desiredSpeed = (800*potSpeed)/16384;
-            actualSpeedL = (8*1500000)/Tach_L_sum;//actual speed for left wheel
-            actualSpeedR = (8*1500000)/Tach_R_sum;//actual speed for right wheel
+            actualSpeedL = (8*1500000)/Tach_L_avg;//actual speed for left wheel
+            actualSpeedR = (8*1500000)/Tach_R_avg;//actual speed for right wheel
 
             //left wheel
-            errorSum += desiredSpeed - actualSpeedL;//integration for left
-            pwm_setL = desiredSpeed + ki*errorSum;//PI control equation
+            errorSumL += desiredSpeed - actualSpeedL;//integration for left
+            pwm_setL = desiredSpeed + ki*errorSumL;//PI control equation
             if(pwm_setL > pwm_max) {
                 pwm_setL = pwm_max;
             }
-            else if (pwm_setL < pwm_min) {
-                pwm_setL = pwm_min;
+            else if (pwm_setL <= pwm_min) {
+                pwm_setL = 0;
             }
-            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setL); // enforce pwm control output
-
+            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setL); // enforce pwm control output
 
             //right wheel
-            errorSum += desiredSpeed - actualSpeedR;//integration for left
-            pwm_setR = desiredSpeed + ki*errorSum;//PI control equation
+            errorSumR += desiredSpeed - actualSpeedR;//integration for left
+            pwm_setR = desiredSpeed + ki*errorSumR;//PI control equation
             if(pwm_setR > pwm_max) {
                 pwm_setR = pwm_max;
             }
-            else if (pwm_setR < pwm_min) {
-                pwm_setR = pwm_min;
+            else if (pwm_setR <= pwm_min) {
+                pwm_setR = 0;
             }
             Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
 
-
             potDist = ADC14_getResult(ADC_MEM1);
-
 
             printf("\r\n\npotSpeed: %1.3f  desiredSpeed: %1.3f    \r\nactualR: %1.3f   actualL: %1.3f   \r\npwmR: %1.3f      pwmL: %1.3f  \r\n%d",potSpeed,desiredSpeed,actualSpeedR, actualSpeedL,pwm_setR,pwm_setL,Tach_L_sum);
 
 
             //turn control//
 //            dv = (pwm_set*0.5*74.5)/500000;
-
-
-//
 //            //speed control//
 //            //left inetgration
 //            Tach_L_sum += desiredSpeed - actualSpeed;//integration
@@ -112,7 +106,8 @@ int main(void)
 //            if(pwm_setR > pwm_max) pwm_setR = pwm_max;  // Set limits on the pwm control output
 //            if(pwm_setR < pwm_min) pwm_setR = pwm_min;
 //            Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setR); // enforce pwm control output
-//            __delay_cycles(240e3);
+            __delay_cycles(240e3);
+
         }
     }
 }
@@ -253,5 +248,21 @@ void checkState(){
 //    else if (curdistance >= actualDist) {
 //        state = 0; //0 means it switches turning
 //    }
+
+}
+
+void turning(){//turn left
+    dv = desiredSpeed(0.5*dw/potDist);//differential
+    speedL = pwm_setL - dv;
+    speedR = pwm_setR + dv;
+    //PI left
+    errorSumL += speedL - actualSpeedL;//integration for left
+    pwm_setL = speedL + ki*errorSumL;//PI control equation
+    //PI right
+    errorSumR += speedR - actualSpeedR;//integration for left
+    pwm_setR = speedR + ki*errorSumR;//PI control equation
+
+    Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setL); // enforce pwm control output
+    Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
 
 }
