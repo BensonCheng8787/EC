@@ -5,9 +5,12 @@ void TimerInit();
 void ADCInit();
 void Encoder_ISR();
 void T1_100ms_ISR();
-void turning();
+void I2CInit();
+uint16_t readCompass();
+uint16_t readRanger();
+void I2C_writeData( uint32_t moduleInstance , uint8_t PeriphAddress , uint8_t StartReg , uint8_t * data , uint8_t len );
+void I2C_readData( uint32_t moduleInstance , uint8_t PeriphAddress , uint8_t StartReg , uint8_t * data , uint8_t len );
 
-void checkState();//checks the current state of the car(straight or turning) updates var state if done
 
 Timer_A_UpModeConfig TA0cfg;
 Timer_A_UpModeConfig TA1cfg;
@@ -18,20 +21,27 @@ Timer_A_CaptureModeConfig TA3_ccr0;
 Timer_A_CaptureModeConfig TA3_ccr1;
 
 
+
+uint8_t datacom[2];
+uint8_t lencom=2;
+uint16_t heading;
+
+uint8_t  dataran[2];
+uint8_t lenran=2;
+uint16_t range;
+
+eUSCI_I2C_MasterConfig config;
+
+
+
 // Encoder total events
 uint32_t enc_total_L,enc_total_R;
 // Speed measurement variables
-float potSpeed,desiredSpeed,actualSpeedL,actualSpeedR;
+float potSpeed,desiredSpeed,desiredSpeedL,desiredSpeedR,actualSpeedL,actualSpeedR;
 float potDist,desiredDist,desiredDistRadius;
 int32_t Tach_L_count,Tach_L,Tach_L_sum,Tach_L_sum_count,Tach_L_avg; // Left wheel
 int32_t Tach_R_count,Tach_R,Tach_R_sum,Tach_R_sum_count,Tach_R_avg; // Right wheel
-//speed control
-float ki = 0.1;
-float pwm_setL,pwm_setR,pwm_max,pwm_min;
-//turn control
-float pwm_set,dt,rl,rr,vl,vr,radius,dw,dv,speedL,speedR;
-uint16_t curDistance; //current distance
-uint8_t state; //1 means straight and 0 means turning
+
 uint32_t errorSumL, errorSumR;
 
 
@@ -43,16 +53,10 @@ int main(void)
     GPIOInit();
     ADCInit();
     TimerInit();
+    I2CInit();
 
     __delay_cycles(24e6);
     GPIO_setOutputHighOnPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);//motor back on
-
-    pwm_max = 720;//90%
-    pwm_min = 80;//10%
-    dw = 149; //in mm
-    pwm_setL = 0;
-    pwm_setR = 0;
-    state = 1;
 
     while(1){
         if(run_control){    // If 100 ms has passed
@@ -126,10 +130,6 @@ int main(void)
             Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
 
 
-            printf("\r\n\npotSpeed: %1.3f  desiredSpeed: %1.3f    \r\nactualR: %1.3f   actualL: %1.3f   \r\npwmR: %1.3f      pwmL: %1.3f",potSpeed,desiredSpeed,actualSpeedR, actualSpeedL,pwm_setR,pwm_setL);
-            printf("\r\n\npotDist: %1.3f  desiredDist: %1.3f  desiredRadius: %1.3f   desiredDistturning: %1.3f   curDistance: %d   state: %d   dv: %1.3f",potDist,desiredDist,desiredDistRadius,(3.14159)*(desiredDistRadius-74.5),curDistance,state,dv);
-
-            checkState();
 
             __delay_cycles(240e3);
 
@@ -154,16 +154,22 @@ void ADCInit(){
 void GPIOInit(){
     GPIO_setAsOutputPin(GPIO_PORT_P5,GPIO_PIN4|GPIO_PIN5);   // Motor direction pins
     GPIO_setAsOutputPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);   // Motor enable pins
-        // Motor PWM pins
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P2,GPIO_PIN6|GPIO_PIN7,GPIO_PRIMARY_MODULE_FUNCTION);
-        // Motor Encoder pins
-    GPIO_setAsPeripheralModuleFunctionInputPin(GPIO_PORT_P10,GPIO_PIN4|GPIO_PIN5,GPIO_PRIMARY_MODULE_FUNCTION);
 
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN1,GPIO_TERTIARY_MODULE_FUNCTION);//desired speed potentiometer
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P4,GPIO_PIN4,GPIO_TERTIARY_MODULE_FUNCTION);//desired turning radius
+    //compass and ranger
+    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P6,GPIO_PIN6,GPIO_SECONDARY_MODULE_FUNCTION);
+    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P6,GPIO_PIN7,GPIO_SECONDARY_MODULE_FUNCTION);
 
     GPIO_setOutputLowOnPin(GPIO_PORT_P5,GPIO_PIN4|GPIO_PIN5);   // Motors set to forward
     GPIO_setOutputLowOnPin(GPIO_PORT_P3,GPIO_PIN6|GPIO_PIN7);   // Motors are OFF
+}
+
+void I2CInit(){
+    config.selectClockSource = (EUSCI_B_I2C_CLOCKSOURCE_SMCLK);
+    config.i2cClk=24000000;
+    config.dataRate=(EUSCI_B_I2C_SET_DATA_RATE_100KBPS);
+    config.byteCounterThreshold=(0);
+    I2C_initMaster( EUSCI_B3_BASE , &config );
+    I2C_enableModule(EUSCI_B3_BASE);
 }
 
 void TimerInit(){
@@ -261,34 +267,100 @@ void T1_100ms_ISR(){
     run_control = 1;
 }
 
-void checkState(){
 
-    curDistance = (enc_total_L * 0.60956);
-
-    //turning and switches to straight
-    if (state == 0 && (curDistance+15 >= (3.14159)*(desiredDistRadius+70))) {
-        enc_total_L = 0;
-        state = 1; //1 means that it switches to straight
+uint16_t readCompass(){
+    if(lencom >= 2) {
+        I2C_readData( EUSCI_B3_BASE , 0x60 , 2 , datacom , lencom );
+        heading = (datacom[0]<<8);
+        heading |= datacom[1];
+        return heading;
     }
-    else if (state == 1 && curDistance >= desiredDist) {
-        enc_total_L = 0;
-        state = 0; //0 means it switches turning
-    }
-
+    else
+        return 0;
 }
 
-void turning(){//turn left
-    dv = desiredSpeed*(0.5*dw/potDist);//differential
-    speedL = pwm_setL - dv;
-    speedR = pwm_setR + dv;
-    //PI left
-    errorSumL += speedL - actualSpeedL;//integration for left
-    pwm_setL = speedL + ki*errorSumL;//PI control equation
-    //PI right
-    errorSumR += speedR - actualSpeedR;//integration for left
-    pwm_setR = speedR + ki*errorSumR;//PI control equation
+uint16_t readRanger(){
+    if(lenran >= 2) {
+        I2C_readData( EUSCI_B3_BASE , 0x70 , 2 , dataran , lenran );
+        range = (dataran[0]<<8);
+        range |= dataran[1];
 
-    Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4,pwm_setL); // enforce pwm control output
-    Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_3,pwm_setR); // enforce pwm control output
-
+        dataran[0]=0x51;
+        I2C_writeData(EUSCI_B3_BASE,0x70,0,dataran,1);
+        return range;
+    }
+    else
+        return 0;
 }
+
+void I2C_writeData(uint32_t moduleInstance
+                  ,uint8_t PeriphAddress
+                  ,uint8_t StartReg
+                  ,uint8_t *data
+                  ,uint8_t len)
+{
+    I2C_setSlaveAddress(moduleInstance,PeriphAddress); // Set the peripheral address
+    I2C_setMode(moduleInstance,EUSCI_B_I2C_TRANSMIT_MODE); // Indicate a write operation
+
+    I2C_masterSendMultiByteStart(moduleInstance,StartReg); // Start the communication.
+                // This function does three things. It sends the START signal,
+                // sends the address, and then sends the start register.
+
+    // This code loops through all of the bytes to send.
+    uint8_t ctr;
+    for(ctr = 0;ctr<len;ctr++){
+        I2C_masterSendMultiByteNext(moduleInstance,data[ctr]);
+    }
+    // Once all bytes are sent, the I2C transaction is stopped by sending the STOP signal
+    I2C_masterSendMultiByteStop(moduleInstance);
+
+    __delay_cycles(200); // A short delay to avoid starting another I2C transaction too quickly
+}
+
+void I2C_readData(uint32_t moduleInstance
+                 ,uint8_t PeriphAddress
+                 ,uint8_t StartReg
+                 ,uint8_t *data
+                 ,uint8_t len)
+{
+    // First write the start register to the peripheral device. This can be
+    // done by using the I2C_writeData function with a length of 0.
+    I2C_writeData(moduleInstance,PeriphAddress,StartReg,0,0);
+
+    Interrupt_disableMaster(); //  Disable all interrupts to prevent timing issues
+
+    // Then do read transaction...
+    I2C_setSlaveAddress(moduleInstance,PeriphAddress); // Set the peripheral address
+    I2C_setMode(moduleInstance,EUSCI_B_I2C_RECEIVE_MODE); // Indicate a read operation
+    I2C_masterReceiveStart(moduleInstance); // Start the communication. This function
+                // doe two things: It first sends the START signal and
+                // then sends the peripheral address. Once started, the eUSCI
+                // will automatically fetch bytes from the peripheral until
+                // a STOP signal is requested to be sent.
+
+    // This code loops through 1 less than all bytes to receive
+    uint8_t ctr;
+    for(ctr = 0;ctr<(len-1);ctr++){
+        uint32_t tout_tmp = 10000;
+        while(!(EUSCI_B_CMSIS(moduleInstance)->IFG & EUSCI_B_IFG_RXIFG0) && --tout_tmp); // Wait for a data byte to become available
+        if(tout_tmp){
+            data[ctr] = I2C_masterReceiveMultiByteNext(moduleInstance); // read and store received byte
+        }else{
+            data[ctr] = 0xFF;
+        }
+    }
+    // Prior to receiving the final byte, request the STOP signal such that the
+    // communication will halt after the byte is received.
+    data[ctr] = I2C_masterReceiveMultiByteFinish(moduleInstance); // send STOP, read and store received byte
+
+    Interrupt_enableMaster(); // Re-enable interrupts
+
+    __delay_cycles(200); // A short delay to avoid starting another I2C transaction too quickly
+}
+// Add function declarations here as needed
+
+// Add interrupt functions last so they are easy to find
+
+
+
+
